@@ -1,0 +1,11 @@
+{
+	"id": "obsidian-imgcast-discord-plugin",
+	"name": "ImgCast Discord",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Upload images to Discord channels via webhooks with right-click context menu",
+	"author": "Your Name",
+	"authorUrl": "",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}
