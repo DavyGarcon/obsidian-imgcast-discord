@@ -23,13 +23,6 @@ An Obsidian plugin that allows you to upload images directly to Discord channels
    - **Linux**: `~/.config/obsidian/plugins/`
 4. Enable the plugin in Obsidian under `Settings > Community Plugins`
 
-### Using Obsidian BRAT
-
-1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin
-2. Go to `Settings > BRAT Plugins`
-3. Add this repository URL and click "Add Plugin"
-4. Enable the plugin once installed
-
 ## Setup
 
 1. **Create a Discord Webhook**:
@@ -71,51 +64,6 @@ An Obsidian plugin that allows you to upload images directly to Discord channels
 - WebP (.webp)
 - BMP (.bmp)
 - SVG (.svg)
-
-## Building from Source
-
-If you want to build the plugin yourself:
-
-### Prerequisites
-- Node.js (v16 or higher)
-- npm or yarn
-
-### Steps
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/your-username/obsidian-imgcast-discord-plugin.git
-   cd obsidian-imgcast-discord-plugin
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-
-3. **Development Build**:
-   ```bash
-   npm run dev
-   ```
-   This will start the development server with file watching and inline sourcemaps.
-
-4. **Production Build**:
-   ```bash
-   npm run build
-   ```
-   This will create an optimized production build in `main.js`.
-
-5. **Version Bump**:
-   ```bash
-   npm run version
-   ```
-   This will update the version in `manifest.json` and `versions.json`.
-
-### Development Scripts
-
-- `npm run dev` - Start development build with watching
-- `npm run build` - Create production build
-- `npm run version` - Bump version numbers
 
 ## Configuration Options
 
