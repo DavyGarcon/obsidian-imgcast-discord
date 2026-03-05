@@ -29,8 +29,7 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
-  webhookUrl: "",
-  username: "ImgCast Bot"
+  bots: []
 };
 var ImgCastDiscordPlugin = class extends import_obsidian.Plugin {
   async onload() {
@@ -44,9 +43,20 @@ var ImgCastDiscordPlugin = class extends import_obsidian.Plugin {
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (file instanceof import_obsidian.TFile && this.isImageFile(file)) {
-          menu.addItem((item) => {
-            item.setTitle("Upload to Discord").setIcon("upload").onClick(() => this.uploadImageToDiscord(file));
-          });
+          const bots = this.settings.bots;
+          if (bots.length === 0) {
+            menu.addItem((item) => {
+              item.setTitle("Upload to Discord").setIcon("upload").onClick(() => {
+                new import_obsidian.Notice("Please configure at least one bot in settings");
+              });
+            });
+          } else {
+            bots.forEach((bot) => {
+              menu.addItem((item) => {
+                item.setTitle(`Upload to ${bot.name}`).setIcon("upload").onClick(() => this.uploadImageToDiscord(file, bot));
+              });
+            });
+          }
         }
       })
     );
@@ -95,40 +105,61 @@ var ImgCastDiscordPlugin = class extends import_obsidian.Plugin {
 			padding: 4px 0;
 			box-shadow: var(--shadow-s);
 			z-index: 10000;
-			min-width: 150px;
+			min-width: 180px;
 		`;
-    const menuItem = document.createElement("div");
-    menuItem.style.cssText = `
-			padding: 8px 12px;
-			cursor: pointer;
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			color: var(--text-normal);
-			font-size: var(--font-ui-small);
-		`;
-    menuItem.innerHTML = `
-			<span style="width: 16px; height: 16px; display: inline-block;">\u2B06\uFE0F</span>
-			Upload to Discord
-		`;
-    menuItem.addEventListener("mouseenter", () => {
-      menuItem.style.background = "var(--background-modifier-hover)";
+    const bots = this.settings.bots;
+    if (bots.length === 0) {
+      const menuItem = document.createElement("div");
+      menuItem.style.cssText = `
+				padding: 8px 12px;
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				color: var(--text-muted);
+				font-size: var(--font-ui-small);
+			`;
+      menuItem.innerHTML = `
+				<span style="width: 16px; height: 16px; display: inline-block;">\u2699\uFE0F</span>
+				No bots configured
+			`;
+      menu.appendChild(menuItem);
+      return menu;
+    }
+    bots.forEach((bot) => {
+      const menuItem = document.createElement("div");
+      menuItem.style.cssText = `
+				padding: 8px 12px;
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				color: var(--text-normal);
+				font-size: var(--font-ui-small);
+			`;
+      menuItem.innerHTML = `
+				<span style="width: 16px; height: 16px; display: inline-block;">\u2B06\uFE0F</span>
+				Upload to ${bot.name}
+			`;
+      menuItem.addEventListener("mouseenter", () => {
+        menuItem.style.background = "var(--background-modifier-hover)";
+      });
+      menuItem.addEventListener("mouseleave", () => {
+        menuItem.style.background = "";
+      });
+      menuItem.addEventListener("click", async () => {
+        menu.remove();
+        await this.handleImageUploadFromSrc(img.src, bot);
+      });
+      menu.appendChild(menuItem);
     });
-    menuItem.addEventListener("mouseleave", () => {
-      menuItem.style.background = "";
-    });
-    menuItem.addEventListener("click", async () => {
-      menu.remove();
-      await this.handleImageUploadFromSrc(img.src);
-    });
-    menu.appendChild(menuItem);
     return menu;
   }
-  async handleImageUploadFromSrc(src) {
+  async handleImageUploadFromSrc(src, bot) {
     try {
       console.log("Handling image upload from src:", src);
       let file = this.app.workspace.getActiveFile();
-      console.log("Active file:", file == null ? void 0 : file.path, "Is image:", file ? this.isImageFile(file) : false);
+      console.log("Active file:", file && file.path, "Is image:", file ? this.isImageFile(file) : false);
       if (!file || !this.isImageFile(file)) {
         if (src.startsWith("app://")) {
           let path = src.replace("app://", "");
@@ -152,9 +183,9 @@ var ImgCastDiscordPlugin = class extends import_obsidian.Plugin {
           }
         }
       }
-      console.log("Final file found:", file == null ? void 0 : file.path, "Is image:", file ? this.isImageFile(file) : false);
+      console.log("Final file found:", file && file.path, "Is image:", file ? this.isImageFile(file) : false);
       if (file && this.isImageFile(file)) {
-        await this.uploadImageToDiscord(file);
+        await this.uploadImageToDiscord(file, bot);
       } else {
         new import_obsidian.Notice(`Could not find image file from context. Src: ${src}`);
       }
@@ -163,17 +194,19 @@ var ImgCastDiscordPlugin = class extends import_obsidian.Plugin {
       new import_obsidian.Notice(`\u274C Upload failed: ${error.message}`);
     }
   }
-  async uploadBlobToDiscord(blob, filename) {
-    if (!this.settings.webhookUrl) {
-      new import_obsidian.Notice("Please configure Discord webhook URL in settings");
+  async uploadBlobToDiscord(blob, filename, bot) {
+    const webhookUrl = bot && bot.webhookUrl ? bot.webhookUrl : this.settings.bots.length > 0 ? this.settings.bots[0].webhookUrl : "";
+    const username = bot && bot.name ? bot.name : "ImgCast Bot";
+    if (!webhookUrl) {
+      new import_obsidian.Notice("Please configure at least one Discord bot in settings");
       return;
     }
     try {
       const formData = new FormData();
       formData.append("file1", blob, filename);
-      formData.append("username", this.settings.username);
+      formData.append("username", username);
       formData.append("content", "Image upload");
-      const response = await fetch(this.settings.webhookUrl, {
+      const response = await fetch(webhookUrl, {
         method: "POST",
         body: formData
       });
@@ -207,21 +240,34 @@ var ImgCastDiscordPlugin = class extends import_obsidian.Plugin {
     const match = imageRegex.exec(selectedText || line);
     if (match) {
       const imagePath = match[1];
-      menu.addItem((item) => {
-        item.setTitle("Upload image to Discord").setIcon("upload").onClick(async () => {
-          const file = this.app.vault.getAbstractFileByPath(imagePath);
-          if (file instanceof import_obsidian.TFile && this.isImageFile(file)) {
-            await this.uploadImageToDiscord(file);
-          } else {
-            new import_obsidian.Notice("Could not find image file");
-          }
+      const bots = this.settings.bots;
+      if (bots.length === 0) {
+        menu.addItem((item) => {
+          item.setTitle("Upload image to Discord").setIcon("upload").onClick(async () => {
+            new import_obsidian.Notice("Please configure at least one bot in settings");
+          });
         });
-      });
+      } else {
+        bots.forEach((bot) => {
+          menu.addItem((item) => {
+            item.setTitle(`Upload image to ${bot.name}`).setIcon("upload").onClick(async () => {
+              const file = this.app.vault.getAbstractFileByPath(imagePath);
+              if (file instanceof import_obsidian.TFile && this.isImageFile(file)) {
+                await this.uploadImageToDiscord(file, bot);
+              } else {
+                new import_obsidian.Notice("Could not find image file");
+              }
+            });
+          });
+        });
+      }
     }
   }
-  async uploadImageToDiscord(file) {
-    if (!this.settings.webhookUrl) {
-      new import_obsidian.Notice("Please configure Discord webhook URL in settings");
+  async uploadImageToDiscord(file, bot) {
+    const webhookUrl = bot && bot.webhookUrl ? bot.webhookUrl : this.settings.bots.length > 0 ? this.settings.bots[0].webhookUrl : "";
+    const username = bot && bot.name ? bot.name : "ImgCast Bot";
+    if (!webhookUrl) {
+      new import_obsidian.Notice("Please configure at least one Discord bot in settings");
       return;
     }
     try {
@@ -229,9 +275,9 @@ var ImgCastDiscordPlugin = class extends import_obsidian.Plugin {
       const blob = new Blob([buffer], { type: this.getMimeType(file.extension) });
       const formData = new FormData();
       formData.append("file1", blob, file.name);
-      formData.append("username", this.settings.username);
+      formData.append("username", username);
       formData.append("content", "Image upload");
-      const response = await fetch(this.settings.webhookUrl, {
+      const response = await fetch(webhookUrl, {
         method: "POST",
         body: formData
       });
@@ -269,13 +315,63 @@ var ImgCastDiscordSettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "ImgCast Discord Settings" });
-    new import_obsidian.Setting(containerEl).setName("Discord Webhook URL").setDesc("The webhook URL for your Discord channel").addText((text) => text.setPlaceholder("https://discord.com/api/webhooks/...").setValue(this.plugin.settings.webhookUrl).onChange(async (value) => {
-      this.plugin.settings.webhookUrl = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian.Setting(containerEl).setName("Username").setDesc("The username that will appear when uploading images").addText((text) => text.setPlaceholder("ImgCast Bot").setValue(this.plugin.settings.username).onChange(async (value) => {
-      this.plugin.settings.username = value;
-      await this.plugin.saveSettings();
-    }));
+    containerEl.createEl("h3", { text: "Discord Bots" });
+    const botsContainer = containerEl.createDiv();
+    botsContainer.style.display = "flex";
+    botsContainer.style.flexDirection = "column";
+    botsContainer.style.gap = "12px";
+    this.plugin.settings.bots.forEach((bot, index) => {
+      this.renderBot(botsContainer, bot, index);
+    });
+    new import_obsidian.Setting(containerEl).addButton((button) => {
+      button.setButtonText("Add Bot").setIcon("plus").onClick(async () => {
+        const newBot = {
+          id: Date.now().toString(),
+          name: "",
+          webhookUrl: ""
+        };
+        this.plugin.settings.bots.push(newBot);
+        await this.plugin.saveSettings();
+        this.display();
+      });
+    });
+  }
+  renderBot(container, bot, index) {
+    const botDiv = container.createDiv();
+    botDiv.style.cssText = `
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 6px;
+			padding: 12px;
+			background: var(--background-secondary);
+		`;
+    const header = botDiv.createDiv();
+    header.style.display = "flex";
+    header.style.justifyContent = "space-between";
+    header.style.alignItems = "center";
+    header.style.marginBottom = "12px";
+    header.createEl("strong", { text: bot.name || `Bot ${index + 1}` });
+    new import_obsidian.Setting(header).addButton((button) => {
+      button.setIcon("trash").onClick(async () => {
+        this.plugin.settings.bots.splice(index, 1);
+        await this.plugin.saveSettings();
+        this.display();
+      });
+    });
+    new import_obsidian.Setting(botDiv).setName("Bot Name").setDesc("Name shown in the context menu").addText((text) => {
+      text.setPlaceholder("My Discord Bot").setValue(bot.name).onChange(async (value) => {
+        bot.name = value;
+        await this.plugin.saveSettings();
+        const strongEl = header.querySelector("strong");
+        if (strongEl) {
+          strongEl.setText(value || `Bot ${index + 1}`);
+        }
+      });
+    });
+    new import_obsidian.Setting(botDiv).setName("Webhook URL").setDesc("The webhook URL for this bot").addText((text) => {
+      text.setPlaceholder("https://discord.com/api/webhooks/...").setValue(bot.webhookUrl).onChange(async (value) => {
+        bot.webhookUrl = value;
+        await this.plugin.saveSettings();
+      });
+    });
   }
 };

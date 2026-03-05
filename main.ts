@@ -1,13 +1,17 @@
 import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
 
-interface ImgCastDiscordSettings {
+interface DiscordBot {
+	id: string;
+	name: string;
 	webhookUrl: string;
-	username: string;
+}
+
+interface ImgCastDiscordSettings {
+	bots: DiscordBot[];
 }
 
 const DEFAULT_SETTINGS: ImgCastDiscordSettings = {
-	webhookUrl: '',
-	username: 'ImgCast Bot'
+	bots: []
 }
 
 export default class ImgCastDiscordPlugin extends Plugin {
@@ -30,11 +34,24 @@ export default class ImgCastDiscordPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on('file-menu', (menu: any, file) => {
 				if (file instanceof TFile && this.isImageFile(file)) {
-					menu.addItem((item: any) => {
-						item.setTitle('Upload to Discord')
-							.setIcon('upload')
-							.onClick(() => this.uploadImageToDiscord(file));
-					});
+					const bots = this.settings.bots;
+					if (bots.length === 0) {
+						menu.addItem((item: any) => {
+							item.setTitle('Upload to Discord')
+								.setIcon('upload')
+								.onClick(() => {
+									new Notice('Please configure at least one bot in settings');
+								});
+						});
+					} else {
+						bots.forEach((bot) => {
+							menu.addItem((item: any) => {
+								item.setTitle(`Upload to ${bot.name}`)
+									.setIcon('upload')
+									.onClick(() => this.uploadImageToDiscord(file, bot));
+							});
+						});
+					}
 				}
 			})
 		);
@@ -105,50 +122,74 @@ export default class ImgCastDiscordPlugin extends Plugin {
 			padding: 4px 0;
 			box-shadow: var(--shadow-s);
 			z-index: 10000;
-			min-width: 150px;
+			min-width: 180px;
 		`;
-		
-		const menuItem = document.createElement('div');
-		menuItem.style.cssText = `
-			padding: 8px 12px;
-			cursor: pointer;
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			color: var(--text-normal);
-			font-size: var(--font-ui-small);
-		`;
-		
-		menuItem.innerHTML = `
-			<span style="width: 16px; height: 16px; display: inline-block;">⬆️</span>
-			Upload to Discord
-		`;
-		
-		menuItem.addEventListener('mouseenter', () => {
-			menuItem.style.background = 'var(--background-modifier-hover)';
+
+		const bots = this.settings.bots;
+
+		if (bots.length === 0) {
+			const menuItem = document.createElement('div');
+			menuItem.style.cssText = `
+				padding: 8px 12px;
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				color: var(--text-muted);
+				font-size: var(--font-ui-small);
+			`;
+			menuItem.innerHTML = `
+				<span style="width: 16px; height: 16px; display: inline-block;">⚙️</span>
+				No bots configured
+			`;
+			menu.appendChild(menuItem);
+			return menu;
+		}
+
+		bots.forEach((bot) => {
+			const menuItem = document.createElement('div');
+			menuItem.style.cssText = `
+				padding: 8px 12px;
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				color: var(--text-normal);
+				font-size: var(--font-ui-small);
+			`;
+			
+			menuItem.innerHTML = `
+				<span style="width: 16px; height: 16px; display: inline-block;">⬆️</span>
+				Upload to ${bot.name}
+			`;
+			
+			menuItem.addEventListener('mouseenter', () => {
+				menuItem.style.background = 'var(--background-modifier-hover)';
+			});
+			
+			menuItem.addEventListener('mouseleave', () => {
+				menuItem.style.background = '';
+			});
+			
+			menuItem.addEventListener('click', async () => {
+				menu.remove();
+				await this.handleImageUploadFromSrc(img.src, bot);
+			});
+			
+			menu.appendChild(menuItem);
 		});
-		
-		menuItem.addEventListener('mouseleave', () => {
-			menuItem.style.background = '';
-		});
-		
-		menuItem.addEventListener('click', async () => {
-			menu.remove();
-			await this.handleImageUploadFromSrc(img.src);
-		});
-		
-		menu.appendChild(menuItem);
+
 		return menu;
 	}
 
-	async handleImageUploadFromSrc(src: string) {
+	async handleImageUploadFromSrc(src: string, bot?: DiscordBot) {
 		try {
 			console.log('Handling image upload from src:', src);
 			
 			// Get the currently active file (this should work when an image is opened)
 			let file: TFile | null = this.app.workspace.getActiveFile();
 			
-			console.log('Active file:', file?.path, 'Is image:', file ? this.isImageFile(file) : false);
+			console.log('Active file:', file && file.path, 'Is image:', file ? this.isImageFile(file) : false);
 			
 			// If the active file is not an image, try to resolve from the image src
 			if (!file || !this.isImageFile(file)) {
@@ -179,10 +220,10 @@ export default class ImgCastDiscordPlugin extends Plugin {
 				}
 			}
 			
-			console.log('Final file found:', file?.path, 'Is image:', file ? this.isImageFile(file) : false);
+			console.log('Final file found:', file && file.path, 'Is image:', file ? this.isImageFile(file) : false);
 			
 			if (file && this.isImageFile(file)) {
-				await this.uploadImageToDiscord(file);
+				await this.uploadImageToDiscord(file, bot);
 			} else {
 				new Notice(`Could not find image file from context. Src: ${src}`);
 			}
@@ -192,9 +233,12 @@ export default class ImgCastDiscordPlugin extends Plugin {
 		}
 	}
 
-	async uploadBlobToDiscord(blob: Blob, filename: string) {
-		if (!this.settings.webhookUrl) {
-			new Notice('Please configure Discord webhook URL in settings');
+	async uploadBlobToDiscord(blob: Blob, filename: string, bot?: DiscordBot) {
+		const webhookUrl = bot && bot.webhookUrl ? bot.webhookUrl : (this.settings.bots.length > 0 ? this.settings.bots[0].webhookUrl : '');
+		const username = bot && bot.name ? bot.name : 'ImgCast Bot';
+
+		if (!webhookUrl) {
+			new Notice('Please configure at least one Discord bot in settings');
 			return;
 		}
 
@@ -202,11 +246,11 @@ export default class ImgCastDiscordPlugin extends Plugin {
 			// Create FormData for Discord webhook
 			const formData = new FormData();
 			formData.append('file1', blob, filename);
-			formData.append('username', this.settings.username);
+			formData.append('username', username);
 			formData.append('content', 'Image upload');
 
 			// Send to Discord webhook
-			const response = await fetch(this.settings.webhookUrl, {
+			const response = await fetch(webhookUrl, {
 				method: 'POST',
 				body: formData
 			});
@@ -238,35 +282,50 @@ export default class ImgCastDiscordPlugin extends Plugin {
 	}
 
 	addImageUploadMenuItem(menu: any, editor: Editor, view: any) {
-		// Get the selected text or current line
 		const selectedText = editor.getSelection();
 		const cursorPos = editor.getCursor();
 		const line = editor.getLine(cursorPos.line);
 		
-		// Check if the line or selection contains an image link
 		const imageRegex = /!\[.*?\]\((.*?)\)/;
 		const match = imageRegex.exec(selectedText || line);
 		
 		if (match) {
 			const imagePath = match[1];
-			menu.addItem((item: any) => {
-				item.setTitle('Upload image to Discord')
-					.setIcon('upload')
-					.onClick(async () => {
-						const file = this.app.vault.getAbstractFileByPath(imagePath);
-					if (file instanceof TFile && this.isImageFile(file)) {
-						await this.uploadImageToDiscord(file);
-					} else {
-						new Notice('Could not find image file');
-					}
+			const bots = this.settings.bots;
+
+			if (bots.length === 0) {
+				menu.addItem((item: any) => {
+					item.setTitle('Upload image to Discord')
+						.setIcon('upload')
+						.onClick(async () => {
+							new Notice('Please configure at least one bot in settings');
+						});
+				});
+			} else {
+				bots.forEach((bot) => {
+					menu.addItem((item: any) => {
+						item.setTitle(`Upload image to ${bot.name}`)
+							.setIcon('upload')
+							.onClick(async () => {
+								const file = this.app.vault.getAbstractFileByPath(imagePath);
+								if (file instanceof TFile && this.isImageFile(file)) {
+									await this.uploadImageToDiscord(file, bot);
+								} else {
+									new Notice('Could not find image file');
+								}
+							});
 					});
-			});
+				});
+			}
 		}
 	}
 
-	async uploadImageToDiscord(file: TFile) {
-		if (!this.settings.webhookUrl) {
-			new Notice('Please configure Discord webhook URL in settings');
+	async uploadImageToDiscord(file: TFile, bot?: DiscordBot) {
+		const webhookUrl = bot && bot.webhookUrl ? bot.webhookUrl : (this.settings.bots.length > 0 ? this.settings.bots[0].webhookUrl : '');
+		const username = bot && bot.name ? bot.name : 'ImgCast Bot';
+
+		if (!webhookUrl) {
+			new Notice('Please configure at least one Discord bot in settings');
 			return;
 		}
 
@@ -278,11 +337,11 @@ export default class ImgCastDiscordPlugin extends Plugin {
 			// Create FormData for Discord webhook
 			const formData = new FormData();
 			formData.append('file1', blob, file.name);
-			formData.append('username', this.settings.username);
+			formData.append('username', username);
 			formData.append('content', 'Image upload');
 
 			// Send to Discord webhook
-			const response = await fetch(this.settings.webhookUrl, {
+			const response = await fetch(webhookUrl, {
 				method: 'POST',
 				body: formData
 			});
@@ -329,26 +388,87 @@ class ImgCastDiscordSettingTab extends PluginSettingTab {
 
 		containerEl.createEl('h2', {text: 'ImgCast Discord Settings'});
 
-		new Setting(containerEl)
-			.setName('Discord Webhook URL')
-			.setDesc('The webhook URL for your Discord channel')
-			.addText(text => text
-				.setPlaceholder('https://discord.com/api/webhooks/...')
-				.setValue(this.plugin.settings.webhookUrl)
-				.onChange(async (value) => {
-					this.plugin.settings.webhookUrl = value;
-					await this.plugin.saveSettings();
-				}));
+		containerEl.createEl('h3', {text: 'Discord Bots'});
+
+		const botsContainer = containerEl.createDiv();
+		botsContainer.style.display = 'flex';
+		botsContainer.style.flexDirection = 'column';
+		botsContainer.style.gap = '12px';
+
+		this.plugin.settings.bots.forEach((bot, index) => {
+			this.renderBot(botsContainer, bot, index);
+		});
 
 		new Setting(containerEl)
-			.setName('Username')
-			.setDesc('The username that will appear when uploading images')
-			.addText(text => text
-				.setPlaceholder('ImgCast Bot')
-				.setValue(this.plugin.settings.username)
-				.onChange(async (value) => {
-					this.plugin.settings.username = value;
-					await this.plugin.saveSettings();
-				}));
+			.addButton(button => {
+				button.setButtonText('Add Bot')
+					.setIcon('plus')
+					.onClick(async () => {
+						const newBot: DiscordBot = {
+							id: Date.now().toString(),
+							name: '',
+							webhookUrl: ''
+						};
+						this.plugin.settings.bots.push(newBot);
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+	}
+
+	renderBot(container: HTMLElement, bot: DiscordBot, index: number) {
+		const botDiv = container.createDiv();
+		botDiv.style.cssText = `
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 6px;
+			padding: 12px;
+			background: var(--background-secondary);
+		`;
+
+		const header = botDiv.createDiv();
+		header.style.display = 'flex';
+		header.style.justifyContent = 'space-between';
+		header.style.alignItems = 'center';
+		header.style.marginBottom = '12px';
+
+		header.createEl('strong', {text: bot.name || `Bot ${index + 1}`});
+
+		new Setting(header)
+			.addButton(button => {
+				button.setIcon('trash')
+					.onClick(async () => {
+						this.plugin.settings.bots.splice(index, 1);
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+
+		new Setting(botDiv)
+			.setName('Bot Name')
+			.setDesc('Name shown in the context menu')
+			.addText(text => {
+				text.setPlaceholder('My Discord Bot')
+					.setValue(bot.name)
+					.onChange(async (value) => {
+						bot.name = value;
+						await this.plugin.saveSettings();
+						const strongEl = header.querySelector('strong');
+						if (strongEl) {
+							strongEl.setText(value || `Bot ${index + 1}`);
+						}
+					});
+			});
+
+		new Setting(botDiv)
+			.setName('Webhook URL')
+			.setDesc('The webhook URL for this bot')
+			.addText(text => {
+				text.setPlaceholder('https://discord.com/api/webhooks/...')
+					.setValue(bot.webhookUrl)
+					.onChange(async (value) => {
+						bot.webhookUrl = value;
+						await this.plugin.saveSettings();
+					});
+			});
 	}
 }
